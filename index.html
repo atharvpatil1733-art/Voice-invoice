@@ -235,6 +235,7 @@ function installApp(){if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.
 let isRecording=false,recognition=null,finalTranscript='',parsedData=null;
 let isParked=false,manuallyUnlocked=false,speedHistory=[],motionChecking=false;
 let reviewItems=[];
+let lastResultIndex=0;
 
 const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
 if(!SpeechRec)document.getElementById('no-speech-warn').style.display='block';
@@ -293,27 +294,59 @@ initGPS();
 
 function toggleRecording(){if(!SpeechRec)return;isRecording?stopRecording():startRecording();}
 function startRecording(){
+  finalTranscript='';
+  lastResultIndex=0;
+  createRecognition();
+}
+
+function createRecognition(){
+  if(!isRecording&&recognition)return;
   recognition=new SpeechRec();
-  recognition.continuous=true;recognition.interimResults=true;recognition.lang='en-IN';
+  recognition.continuous=false;
+  recognition.interimResults=true;
+  recognition.lang='en-IN';
+  recognition.maxAlternatives=1;
+
   recognition.onresult=e=>{
-    let interim='',final=finalTranscript;
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';
-      else interim+=e.results[i][0].transcript;
+    let interim='';
+    for(let i=0;i<e.results.length;i++){
+      const res=e.results[i];
+      if(res.isFinal){
+        const txt=res[0].transcript.trim();
+        if(txt&&!finalTranscript.endsWith(txt+' ')){
+          finalTranscript+=txt+' ';
+        }
+      } else {
+        interim+=res[0].transcript;
+      }
     }
-    finalTranscript=final;
-    document.getElementById('transcript-box').innerHTML='<span>'+finalTranscript+'</span>'+(interim?'<span style="color:#bbb">'+interim+'</span>':'');
+    const box=document.getElementById('transcript-box');
+    box.innerHTML='<span>'+finalTranscript+'</span>'+(interim?'<span style="color:#bbb">'+interim+'</span>':'');
   };
-  recognition.onerror=e=>{console.log('Speech error:',e.error);stopRecording();};
-  recognition.onend=()=>{if(isRecording)recognition.start();};
-  recognition.start();isRecording=true;
-  document.getElementById('mic-btn').className='big-btn recording';
-  document.getElementById('mic-label').textContent='Tap to stop';
-  document.getElementById('wave-anim').classList.remove('hidden');
+
+  recognition.onerror=e=>{
+    if(e.error==='no-speech'&&isRecording){setTimeout(()=>createRecognition(),300);return;}
+    console.log('Speech error:',e.error);
+    stopRecording();
+  };
+
+  recognition.onend=()=>{
+    if(isRecording)setTimeout(()=>createRecognition(),200);
+  };
+
+  try{recognition.start();}catch(e){console.log(e);}
+
+  if(!isRecording){
+    isRecording=true;
+    document.getElementById('mic-btn').className='big-btn recording';
+    document.getElementById('mic-label').textContent='Tap to stop';
+    document.getElementById('wave-anim').classList.remove('hidden');
+  }
 }
 function stopRecording(){
-  if(recognition){recognition.onend=null;recognition.stop();}
   isRecording=false;
+  if(recognition){recognition.onend=null;recognition.onerror=null;try{recognition.stop();}catch(e){}recognition=null;}
+
   const has=finalTranscript.trim();
   document.getElementById('mic-btn').className='big-btn '+(has?'done':'idle');
   document.getElementById('mic-label').textContent=has?'Recorded':'Tap to record';
@@ -321,7 +354,7 @@ function stopRecording(){
   document.getElementById('action-btns').style.display=has?'flex':'none';
 }
 function clearMemo(){
-  finalTranscript='';
+  finalTranscript='';lastResultIndex=0;
   document.getElementById('transcript-box').innerHTML='<span class="ph">Your voice memo will appear here...</span>';
   document.getElementById('mic-btn').className='big-btn idle';
   document.getElementById('mic-label').textContent='Tap to record';
